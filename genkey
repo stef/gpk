@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+
+# invoke with ./genkey mynick 8192 5
+#
+# params: <nick> <keybits> <passwords> [<working directory>]
+#
+# generates
+# - three passphrases (for the master and the 2 subkeys)
+# - an RSA 8192 signing master key,
+# - one encryting and one signing subkey
+# - an encrypted revocation cert for the masterkey
+# - the key for the revocation cert in 5 ssss shares
+# - an encrypted copy of the masterkey for backup
+# - the key for the backup in 5 ssss shares
+#
+# depends: gnupg, openssl, ssss, gpgsplit, srm
+
+userid="$1"
+keysize="${2:-4096}"
+phraselen="${3:-5}"
+wd="${4:-$(mktemp -d --tmpdir=/run/shm)}"
+
+function createkey {
+    pubring="$wd/pubring.pgp"
+    secring="$wd/secring.pgp"
+
+    read master
+
+    gpg -q --gen-key --batch <(cat <<EOF
+Key-Type: RSA
+Key-Length: $keysize
+Key-Usage: sign
+Name-Comment: $userid
+Expire-Date: 0
+Passphrase: $master
+%secring $secring
+%pubring $pubring
+%commit
+EOF
+)
+
+    keyid="$(gpg --quiet --batch --yes \
+             --no-default-keyring \
+             --secret-keyring $secring \
+             --keyring $pubring \
+             --list-keys \
+             --with-colons test | sed -n '2p' | cut -d: -f5)"
+
+    revokekey="$(openssl rand -hex 128)"
+    # store password for revoke cert in 5/3 ssss shares
+    printf "$revokekey" | ssss-split -t 3 -n 5 -x -Q >"$wd/revoke.shares"
+    # generate revokation cert for masterkey
+    printf "y\n1\nRevocation cert automatically generated at key generation time.\n\ny\n$master\n" |
+       gpg --command-fd 0 \
+           --no-default-keyring \
+           --secret-keyring $secring \
+           --keyring $pubring \
+           --gen-revoke $keyid |
+       gpg -c --command-file <(echo -n "$revokekey") >"$wd/revoke.pgp"
+
+    printf "create a signing and encryption subkey and set the master passphrase\n"
+
+    printf "\naddkey\n$master\n6\n$keysize\n1y\naddkey\n$master\n4\n$keysize\n1y\nsave\n" |
+    gpg --quiet --yes \
+        --no-default-keyring \
+        --secret-keyring $secring \
+        --keyring $pubring \
+        --command-fd 0 \
+        --edit-key "$keyid" 2>/dev/null >/dev/null
+
+    printf "export subkeys\n"
+    gpg --quiet --batch --yes \
+        --no-default-keyring \
+        --secret-keyring $secring \
+        --keyring $pubring \
+        --export-secret-subkeys "$keyid" \
+        >$wd/subkeys.pgp 2>/dev/null
+    mv "$secring" "$wd/masterkey.pgp"
+
+    printf "import subkeys into master-key-less new keyring\n"
+    gpg --quiet --batch --yes \
+        --no-default-keyring \
+        --secret-keyring $secring \
+        --keyring $pubring \
+        --import $wd/subkeys.pgp 2>/dev/null
+
+    read pass1
+    printf "setting encryption password\n"
+    printf "passwd\n$master\n$pass1\nsave\n" |
+    gpg --quiet --yes \
+        --no-default-keyring \
+        --secret-keyring $secring \
+        --keyring $pubring \
+        --command-fd 0 \
+        --edit-key "$keyid" 2>/dev/null >/dev/null
+
+    gpgsplit -p "$wd/pass1" "$secring"
+
+    read pass2
+    printf "setting signing password\n"
+    printf "passwd\n$pass1\n$pass2\nsave\n" |
+    gpg --quiet --yes \
+        --no-default-keyring \
+        --secret-keyring $secring \
+        --keyring $pubring \
+        --command-fd 0 \
+        --edit-key "$keyid" 2>/dev/null >/dev/null
+
+    gpgsplit -p "$wd/pass2" "$secring"
+
+    cat "$wd/pass1000001-005.secret_key"    \
+        "$wd/pass1000002-013.user_id"       \
+        "$wd/pass1000003-002.sig"           \
+        "$wd/pass1000004-012.ring_trust"    \
+        "$wd/pass1000005-007.secret_subkey" \
+        "$wd/pass1000006-002.sig"           \
+        "$wd/pass1000007-012.ring_trust"    \
+        "$wd/pass2000008-007.secret_subkey" \
+        "$wd/pass2000009-002.sig"           \
+        "$wd/pass2000010-012.ring_trust"    \
+        >"$wd/finalkey.pgp"
+
+    srm -fll $wd/pass* "$wd/subkeys.pgp" "$wd/secring.pgp" "$wd/pubring.pgp~"
+
+    backupkey="$(openssl rand -hex 128)"
+    # store password for revoke cert in 5/3 ssss shares
+    printf "$backupkey" | ssss-split -t 3 -n 5 -x -Q >"$wd/backup.shares"
+    gpg -c --command-file <(echo -n "$backupkey") "$wd/masterkey.pgp" >"$wd/backup.pgp"
+
+    printf -- "------------------ keygen done ---------------------------\n"
+    printf "store your masterkey in a secure offline location\n"
+    printf "  $wd/masterkey.pgp\n"
+    printf "import your\n"
+    printf "  public key: $wd/pubring.pgp\n"
+    printf "  subkeys: $wd/finalkey.pgp\n"
+    printf "\n"
+    printf "store the backup of your masterkey in\n"
+    printf "a secure offline location different from the masterkey\n"
+    printf "  $wd/backup.pgp\n"
+    printf "distribute your revocation cert shares\n"
+    printf "  $wd/revoke.shares\n"
+    printf "store your backup shares in various secure locations\n"
+    printf "  $wd/backup.shares\n"
+    printf "\n"
+    printf "Learn your\n"
+    printf " - master password:\n     $master\n"
+    printf " - encryption password:\n     $pass1\n"
+    printf " - signing password:\n     $pass2\n"
+}
+
+# start some entropy generation
+#find / >/dev/null 2>&1 &
+#trap "kill $!" 0 1 2 3 15
+
+# create work directory if not existing
+[[ ! -e "$wd" ]] && {
+    mkdir "$wd" || {
+        printf "oops, can't create workdir. bailing out"
+        exit 1
+    }
+}
+[[ "$(stat -f -c %T $wd)" != "tmpfs" ]] &&
+    printf "Warning temporary keys should be stored in memory only\nFS of $wd is: $(stat -f -c %T "$wd")\n"
+
+# gen key
+for i in $(seq 3); do ./genphrase.py $phraselen; done | createkey "$userid"
