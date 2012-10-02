@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-
+# (c) 2012 s@ctrlc.hu
+#
+#  This is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 3 of the License, or
+#  (at your option) any later version.
+#
 # invoke with ./genkey mynick 8192 5
 #
 # params: <nick> <keybits> <passwords> [<working directory>]
@@ -15,10 +21,9 @@
 #
 # depends: gnupg, openssl, ssss, gpgsplit, srm
 
-userid="$1"
-keysize="${2:-4096}"
-phraselen="${3:-5}"
-wd="${4:-$(mktemp -d --tmpdir=/run/shm)}"
+source ${0%/*}/keytemplate
+
+wd="${1:-$(mktemp -d --tmpdir=/run/shm)}"
 
 function createkey {
     pubring="$wd/pubring.pgp"
@@ -26,12 +31,17 @@ function createkey {
 
     read master
 
-    gpg -q --gen-key --batch <(cat <<EOF
-Key-Type: RSA
-Key-Length: $keysize
+    gpg -q --gen-key --batch <(
+        cat <<EOF
+Key-Type: $KeyType
+Key-Length: $masterkeysize
 Key-Usage: sign
-Name-Comment: $userid
-Expire-Date: 0
+EOF
+        [[ -n "$username" ]] && echo "Name-Real: $username"
+        [[ -n "$usercmt" ]] && echo "Name-Comment: $usercmt"
+        [[ -n "$email" ]] && echo "Name-Email: $email"
+        cat <<EOF
+Expire-Date: $masterexpire
 Passphrase: $master
 %secring $secring
 %pubring $pubring
@@ -44,11 +54,11 @@ EOF
              --secret-keyring $secring \
              --keyring $pubring \
              --list-keys \
-             --with-colons test | sed -n '2p' | cut -d: -f5)"
+             --with-colons | sed -n '2p' | cut -d: -f5)"
 
     revokekey="$(openssl rand -hex 128)"
     # store password for revoke cert in 5/3 ssss shares
-    printf "$revokekey" | ssss-split -t 3 -n 5 -x -Q >"$wd/revoke.shares"
+    printf "$revokekey" | ssss-split -t $revcertsharesneeded -n $revcertshares -x -Q >"$wd/revoke.shares"
     # generate revokation cert for masterkey
     printf "y\n1\nRevocation cert automatically generated at key generation time.\n\ny\n$master\n" |
        gpg --command-fd 0 \
@@ -60,7 +70,7 @@ EOF
 
     printf "create a signing and encryption subkey and set the master passphrase\n"
 
-    printf "\naddkey\n$master\n6\n$keysize\n1y\naddkey\n$master\n4\n$keysize\n1y\nsave\n" |
+    printf "\naddkey\n$master\n6\n$cryptkeysize\n$cryptexpire\naddkey\n$master\n4\n$signkeysize\n$signexpire\nsave\n" |
     gpg --quiet --yes \
         --no-default-keyring \
         --secret-keyring $secring \
@@ -120,11 +130,12 @@ EOF
         "$wd/pass2000010-012.ring_trust"    \
         >"$wd/finalkey.pgp"
 
+    # srm only necessary if not working into tmpfs like volatile storage
     srm -fll $wd/pass* "$wd/subkeys.pgp" "$wd/secring.pgp" "$wd/pubring.pgp~"
 
     backupkey="$(openssl rand -hex 128)"
-    # store password for revoke cert in 5/3 ssss shares
-    printf "$backupkey" | ssss-split -t 3 -n 5 -x -Q >"$wd/backup.shares"
+    # store password for revoke cert in ssss shares
+    printf "$backupkey" | ssss-split -t $backupsharesneeded -n $backupshares -x -Q >"$wd/backup.shares"
     gpg -c --command-file <(echo -n "$backupkey") "$wd/masterkey.pgp" >"$wd/backup.pgp"
 
     printf -- "------------------ keygen done ---------------------------\n"
@@ -163,4 +174,13 @@ EOF
     printf "Warning temporary keys should be stored in memory only\nFS of $wd is: $(stat -f -c %T "$wd")\n"
 
 # gen key
-for i in $(seq 3); do ./genphrase.py $phraselen; done | createkey "$userid"
+{ [[ -z "$masterpass" ]] &&
+    ${0%/*}/genphrase.py $masterphraselen ||
+    printf "$masterpass"
+  [[ -z "$cryptpass" ]] &&
+    ${0%/*}/genphrase.py $cryptphraselen ||
+    printf "$cryptpass"
+  [[ -z "$signpass" ]] &&
+     ${0%/*}/genphrase.py $signphraselen ||
+    printf "$signpass"
+} | createkey "$userid"
