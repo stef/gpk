@@ -1,0 +1,29 @@
+usercmt="master key"                # your nickname
+username="John Doe"                 # your fullname
+email="jd@example.com"              # the comment field from PGP
+
+KeyType="RSA"                       # DSA is too small :/
+
+#masterkeysize="8192"                # enlarge your keysize!
+masterkeysize="1024"                # enlarge your keysize!
+masterphraselen="5"                 # 5 words is a minimum
+masterexpire="0"                    # Master key should never expire
+masterpass=""                       # autogenerate
+
+#signkeysize="4096"
+signkeysize="1024"
+signphraselen="5"                   # 5 words is a minimum
+signexpire="1y"                     # 1 year
+signpass=""                         # autogenerate
+
+#cryptkeysize="4096"
+cryptkeysize="1024"
+cryptphraselen="5"                  # 5 words is a minimum
+cryptexpire="1y"                    # 1 year
+cryptpass=""                        # autogenerate
+
+backupshares="5"                    # generate 5 shares
+backupsharesneeded="4"              # of which 4 are necessary to reconstruct the key
+
+revcertshares="5"                   # also the revocation cert should be split into 5 shares
+revcertsharesneeded="4"             # 4 shares needed to reconstruct the cert
