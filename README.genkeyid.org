@@ -1,0 +1,103 @@
+* genkeyid
+
+A tool that helps you bruteforce arbitrary PGP keyids by modifying the
+timestamp field so that the packet hashes to a given keyid.
+
+This is nothing new, [[http://www.asheesh.org/note/debian/short-key-ids-are-bad-news.html][there]] [[http://seclists.org/fulldisclosure/2010/May/120][are]] existing examples of generated key
+ids. Some people have issues with the ambiguity of keyids, but on of
+the authors of PGP says [[http://www.asheesh.org/note/debian/short-key-ids-are-bad-news.html#1325021704.25][this is ok]]. The PGP [[http://www.pgp.net/pgpnet/pgp-faq/pgp-faq-keys.html#key-public-key-forgery][FAQ]] has more on this.
+
+Since this is a bruteforce attack on the hash algorithm to produce a
+certain pattern in the hash we can increase our chances when we look
+for multiple patterns. If the goal is not one specific keyid, but the
+goal is to generate one of many keyids, then you can prepare a list of
+multiple variations that would be acceptable, which increases your
+chances considerably to find a good keyid with a plausible date.
+
+* genkeyid.py
+
+genkeyid.py takes a file containing a single public key and starts to
+emit all possible keyids by incrementing the Public Key Creation Time
+32bit integer from 0 upwards, recalculating the resulting hash. You
+then have to filter this list of keyids, is it is a lot of data.
+
+A basic invocation of genkeyid would look like this:
+
+#+BEGIN_SRC sh
+python ./genkeyid.py keyring.pub 2>snapshots | grep --color -i -f keycandidates | tee fps
+#+END_SRC
+
+Where keyring.pub is either a keyring with only one public key, or
+your exported public key. The regular expressions per line in
+keycandidates serve as filters (see example later), as genkeyid prints
+out all possible keyids, and that is rather a lot of data, so you only
+store your "hits" in the file "fps".
+
+genkeyid emits snapshot ids to standard error, so you can always
+resume it from some intermediate position by supplying the 32 bit
+integer as the second parameter after the public key in genkeyid.py
+runs to resume or skip processing (see an example in genid.sh).
+
+* setfp.py
+When this exhaustive bruteforce is finished after a few hours on a 3
+year old laptop, you will have a list with potential keyids with
+various dates that complement the hash to the specific keyid. You
+choose the integer from row two and use setfp.py to patch your key
+like this:
+
+#+BEGIN_SRC sh
+python ./setfp.py <secret key> <public key> <seconds since 1970/01/01>"
+#+END_SRC
+
+Be aware that patching the keys only works with unencrypted private
+keys, so you should probably do this 2nd patching step only on a clean
+offline system, that you afterwards shred, if you care about good key
+hygene.
+
+* genid.sh
+There's also genid.sh which tries to automatically generate a new key
+matching a given keyid. There's a few optimisations that burn much
+more entropy but generate quite recent keys:
+
+#+BEGIN_SRC sh
+ksh -x ./genid.sh test "^DEADBEEF "
+#+END_SRC
+
+notice the format of the regex, it is anchored at the start of the
+line, and depends on matching up to the first space, as the format
+that genkeyid produces and which is grepped looks like this:
+
+#+BEGIN_SRC sh
+690f3700 1357248344 50 e5 f7 58 2013-01-03 22:25:44
+#+END_SRC
+
+Of course you could as mentioned earlier also look for more keyids
+with more complex regular expressions.
+
+So when you're done, you could do (presuming you have the binary
+pgpdump installed):
+
+#+BEGIN_SRC sh
+diff -urw <(pgpdump test/pubring.pgp) <(pgpdump test/pubring.pgp-new)
+--- /proc/self/fd/11    2013-04-04 00:36:23.307190845 +0200
++++ /proc/self/fd/12    2013-04-04 00:36:23.307190845 +0200
+@@ -1,6 +1,6 @@
+ Old: Public Key Packet(tag 6)(141 bytes)
+        Ver 4 - new
+-       Public key creation time - Thu Apr  4 00:32:22 CEST 2013
++       Public key creation time - Fri Jan  4 15:06:30 CET 2013
+        Pub alg - RSA Encrypt or Sign(pub 1)
+        RSA n(1024 bits) - ...
+        RSA e(17 bits) - ...
+@@ -36,7 +36,7 @@
+        Hashed Sub: key server preferences(sub 23)(1 bytes)
+                Flag - No-modify
+        Sub: issuer key ID(sub 16)(8 bytes)
+-               Key ID - 0xD39531EF87CB6015
+-       Hash left 2 bytes - a2 5b
+-       RSA m^d mod n(1022 bits) - ...
++               Key ID - 0xEDB069BE93FB0000
++       Hash left 2 bytes - 7c b8
++       RSA m^d mod n(1024 bits) - ...
+                -> PKCS-1
+#+END_SRC
