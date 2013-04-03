@@ -57,7 +57,7 @@ EOF
              --with-colons | sed -n '2p' | cut -d: -f5)"
 
     revokekey="$(openssl rand -hex 128)"
-    # store password for revoke cert in 5/3 ssss shares
+    # store password for revoke cert in ssss shares
     printf "$revokekey" | ssss-split -t $revcertsharesneeded -n $revcertshares -x -Q >"$wd/revoke.shares"
     # generate revokation cert for masterkey
     printf "y\n1\nRevocation cert automatically generated at key generation time.\n\ny\n$master\n" |
