@@ -3,10 +3,6 @@
 A tool that helps you bruteforce arbitrary PGP keyids by modifying the
 timestamp field so that the packet hashes to a given keyid.
 
-This is nothing new, [[http://www.asheesh.org/note/debian/short-key-ids-are-bad-news.html][there]] [[http://seclists.org/fulldisclosure/2010/May/120][are]] existing examples of generated key
-ids. Some people have issues with the ambiguity of keyids, but on of
-the authors of PGP says [[http://www.asheesh.org/note/debian/short-key-ids-are-bad-news.html#1325021704.25][this is ok]]. The PGP [[http://www.pgp.net/pgpnet/pgp-faq/pgp-faq-keys.html#key-public-key-forgery][FAQ]] has more on this.
-
 Since this is a bruteforce attack on the hash algorithm to produce a
 certain pattern in the hash we can increase our chances when we look
 for multiple patterns. If the goal is not one specific keyid, but the
@@ -77,7 +73,7 @@ with more complex regular expressions.
 So when you're done, you could do (presuming you have the binary
 pgpdump installed):
 
-#+BEGIN_SRC sh
+#+BEGIN_EXAMPLE
 diff -urw <(pgpdump test/pubring.pgp) <(pgpdump test/pubring.pgp-new)
 --- /proc/self/fd/11    2013-04-04 00:36:23.307190845 +0200
 +++ /proc/self/fd/12    2013-04-04 00:36:23.307190845 +0200
@@ -100,4 +96,4 @@ diff -urw <(pgpdump test/pubring.pgp) <(pgpdump test/pubring.pgp-new)
 +       Hash left 2 bytes - 7c b8
 +       RSA m^d mod n(1024 bits) - ...
                 -> PKCS-1
-#+END_SRC
+#+END_EXAMPLE
