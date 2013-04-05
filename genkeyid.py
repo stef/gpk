@@ -1,4 +1,4 @@
-#!python
+#!/usr/bin/env python
 
 # invoke with
 # python ./genkeyid.py keyring.pub 2>gpk.snapshots | grep --color -i -f keycandidates | tee fps
